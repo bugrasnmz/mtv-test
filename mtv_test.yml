@@ -1,0 +1,32 @@
+name: MTV Sorgu Testi (100 Tekrar)
+
+on:
+  workflow_dispatch:          # manuel tetikleme
+
+jobs:
+  run-test:
+    runs-on: ubuntu-latest    # GitHub’ın sağladığı Linux VM
+
+    steps:
+      - name: Repo'yu al
+        uses: actions/checkout@v4
+
+      - name: Python kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Bağımlılıkları yükle
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Testi çalıştır (100 iterasyon)
+        run: |
+          python test_mtv.py
+
+      - name: Raporu artefakt olarak yayınla
+        uses: actions/upload-artifact@v4
+        with:
+          name: mtv-service-report
+          path: service_report.csv
