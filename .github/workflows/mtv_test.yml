@@ -17,13 +17,12 @@ jobs:
           python-version: "3.11"
 
       # -------------------------------------------------
-      # Chrome + ChromeDriver kurulumu (koşullu)
+      # ChromeDriver kurulumu (Chrome zaten runner’da mevcut)
       # -------------------------------------------------
-      - name: Ensure Chrome & install matching ChromeDriver
+      - name: Install matching ChromeDriver
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget unzip curl gnupg2 ca-certificates || true
-          sudo apt-get install -y google-chrome-stable || true
+          sudo apt-get install -y wget unzip curl || true
 
           CHROME_VER=$(google-chrome --version | awk '{print $3}')
           CHROME_MAJOR=$(echo $CHROME_VER | cut -d. -f1)
