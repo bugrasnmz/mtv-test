@@ -1,4 +1,4 @@
-import csv, time, json
+import csv, time, json, statistics
 from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -51,7 +51,6 @@ try:
                 request_id = msg["params"]["requestId"]
                 start_time = msg["params"]["response"]["timing"]["requestTime"]
 
-                # loadingFinished event ile duration hesapla
                 duration = None
                 for e in logs:
                     m = json.loads(e["message"])["message"]
@@ -70,11 +69,23 @@ try:
         print(f"✅ Iteration {i}/{ITERATIONS} tamamlandı.")
 
 finally:
+    # CSV raporu yaz
     with REPORT_FILE.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["iteration", "url", "status", "durationMs"])
         writer.writeheader()
         for rec in network_events:
             writer.writerow(rec)
 
-    print(f"\n📊 Rapor oluşturuldu: {REPORT_FILE.resolve()}\n")
+    # Özet istatistikler
+    durations = [rec["durationMs"] for rec in network_events if rec["durationMs"] is not None]
+    if durations:
+        avg = round(statistics.mean(durations), 2)
+        min_dur = round(min(durations), 2)
+        max_dur = round(max(durations), 2)
+        print("\n📊 Özet İstatistikler:")
+        print(f"- Ortalama süre: {avg} ms")
+        print(f"- Minimum süre: {min_dur} ms")
+        print(f"- Maksimum süre: {max_dur} ms")
+
+    print(f"\n📂 Rapor oluşturuldu: {REPORT_FILE.resolve()}\n")
     driver.quit()
