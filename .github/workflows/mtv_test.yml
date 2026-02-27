@@ -43,4 +43,8 @@ jobs:
           CHROME_FLAGS: "--headless --no-sandbox --disable-dev-shm-usage"
         run: python test_mtv.py
 
-      -
+      - name: Upload service report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mtv-service-report
+          path: service_report.csv
