@@ -1,4 +1,4 @@
-# test_mtv.py (Chrome‑uyumlu, minimal driver tanımı)
+# test_mtv.py (Chrome, headless)
 import csv, time
 from pathlib import Path
 from selenium import webdriver
@@ -21,11 +21,11 @@ REPORT_FILE = Path("service_report.csv")
 # -------------------------------------------------
 options = webdriver.ChromeOptions()
 options.add_argument("--headless")               # headless mod
-options.add_argument("--no-sandbox")             # CI ortamı için gerekli
+options.add_argument("--no-sandbox")             # CI ortamı için zorunlu
 options.add_argument("--disable-dev-shm-usage")  # bellek sınırlaması
-driver = webdriver.Chrome(options=options)      # PATH’te chromedriver bulunduğu için ek parametre gerekmez
+driver = webdriver.Chrome(options=options)      # PATH’te chromedriver var
 
-# CDP üzerinden network izleme (Chrome da aynı API)
+# CDP ile network izleme (Chrome aynı API)
 driver.execute_cdp_cmd("Network.enable", {})
 
 network_events = []   # her iteration’da toplanacak

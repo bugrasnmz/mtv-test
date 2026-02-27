@@ -8,20 +8,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # -------------------------------------------------
       # 1️⃣ Repo'yu klonla
+      # -------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # -------------------------------------------------
       # 2️⃣ Python kurulumu
+      # -------------------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3️⃣ Sistem bağımlılıklarını kur (Chrome + ChromeDriver)
-      - name: Install Google Chrome & ChromeDriver
+      # -------------------------------------------------
+      # 3️⃣ Sistem bağımlılıkları: Chrome + ChromeDriver
+      # -------------------------------------------------
+      - name: Install Google Chrome & matching ChromeDriver
         run: |
-          # Chrome (stable) paketini ekle
+          # ----- 3.1 Chrome (stable) kur ----------
           sudo apt-get update
           sudo apt-get install -y wget gnupg2 ca-certificates
           wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
@@ -29,35 +35,49 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
-          # ChromeDriver paketini kur (Chrome sürümüyle aynı sürüm)
-          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
-          # ChromeDriver sürümünü Chrome sürümüne göre al
-          DRIVER_VERSION=$(wget -qO- "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION%%.*}")
-          wget -q "https://chromedriver.storage.googleapis.com/${DRIVER_VERSION}/chromedriver_linux64.zip"
+          # ----- 3.2 Chrome sürümünü öğren ----------
+          CHROME_VER=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
+          echo "Chrome version: $CHROME_VER"
+
+          # ----- 3.3 Aynı major sürümde ChromeDriver'ı indir ----------
+          # ChromeDriver major sürüm numarası (örnek: 145)
+          CHROME_MAJOR=${CHROME_VER%%.*}
+          DRIVER_VER=$(wget -qO- "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR}")
+          echo "ChromeDriver version to download: $DRIVER_VER"
+
+          # ----- 3.4 ChromeDriver zip dosyasını indir ve kur ----------
+          wget -q "https://chromedriver.storage.googleapis.com/${DRIVER_VER}/chromedriver_linux64.zip"
           unzip -o chromedriver_linux64.zip -d $HOME/.local/bin
           chmod +x $HOME/.local/bin/chromedriver
           echo "$HOME/.local/bin" >> $GITHUB_PATH   # PATH’e ekle
 
+      # -------------------------------------------------
       # 4️⃣ Python bağımlılıklarını yükle
+      # -------------------------------------------------
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 5️⃣ Webdriver‑Manager önbelleğini temizle (opsiyonel, hatalı cache varsa)
-      - name: Clean webdriver‑manager cache
-        run: |
-          rm -rf ~/.wdm
+      # -------------------------------------------------
+      # 5️⃣ Webdriver‑manager önbelleğini temizle (opsiyonel)
+      # -------------------------------------------------
+      - name: Clean webdriver-manager cache
+        run: rm -rf ~/.wdm
 
-      # 6️⃣ Selenium testini çalıştır (Chrome, headless)
+      # -------------------------------------------------
+      # 6️⃣ Selenium testini çalıştır (Chrome headless)
+      # -------------------------------------------------
       - name: Run Selenium test (Chrome headless)
         env:
-          # Chrome için gerekli flag’ler
+          # Chrome için gerekli flag’ler (CI ortamı)
           CHROME_FLAGS: "--headless --no-sandbox --disable-dev-shm-usage"
         run: |
           python test_mtv.py
 
+      # -------------------------------------------------
       # 7️⃣ Raporu artefakt olarak yayınla
+      # -------------------------------------------------
       - name: Upload service report
         uses: actions/upload-artifact@v4
         with:
