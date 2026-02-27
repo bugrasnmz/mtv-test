@@ -11,10 +11,10 @@ from selenium.webdriver.support import expected_conditions as EC
 # -------------------------------------------------
 # 1️⃣ Konfigürasyon (değiştirmeniz yeterli)
 # -------------------------------------------------
-BASE_URL = "https://test-ortam.example.com"          # test ortamı URL'si
-MENU_PATH = ["Ana Menü", "Alt Menü", "MTV Sorgu"]    # menü hiyerarşisi (link metni)
-PLATE = "34ABC123"
-PERIOD = "2024-01"
+BASE_URL = "https://ekip.internetsube.intisbank/ekip_retailinternet/index.aspx?M=162070985&S=159215"          # test ortamı URL'si
+MENU_PATH = ["Ödemeler", "MTV/Trafik Cezası", "MTV Ödeme"]    # menü hiyerarşisi (link metni)
+PLATE = "16Y6042"
+PERIOD = "2026"
 ITERATIONS = 100                                      # kaç kez çalıştırılacak
 REPORT_FILE = Path("service_report.csv")
 
