@@ -16,22 +16,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Google Chrome & matching ChromeDriver
+      # -------------------------------------------------
+      # ChromeDriver kurulumu (Chrome zaten runner’da var)
+      # -------------------------------------------------
+      - name: Install matching ChromeDriver
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget unzip curl gnupg2 ca-certificates
-
-          # Google Chrome repo ekle
-          curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-linux.gpg
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-
-          # Chrome sürümünü al
           CHROME_VER=$(google-chrome --version | awk '{print $3}')
           CHROME_MAJOR=$(echo $CHROME_VER | cut -d. -f1)
-
-          # ChromeDriver indir
           DRIVER_VER=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR}")
           curl -s -o chromedriver_linux64.zip "https://chromedriver.storage.googleapis.com/${DRIVER_VER}/chromedriver_linux64.zip"
           unzip -o chromedriver_linux64.zip -d /usr/local/bin
