@@ -1,106 +1,80 @@
-# test_mtv.py (Chrome, headless)
-import csv, time
+import csv, time, json
 from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# -------------------------------------------------
-# 1️⃣ Konfigürasyon (kendi değerlerinizi girin)
-# -------------------------------------------------
-BASE_URL = "https://ekip.internetsube.intisbank/ekip_retailinternet/index.aspx?M=162070985&S=159215"          # test ortamı URL'si
-MENU_PATH = ["Ödemeler", "MTV/Trafik Cezası", "MTV Ödeme"]    # menü hiyerarşisi (link metni)
+BASE_URL = "https://ekip.internetsube.intisbank/ekip_retailinternet/index.aspx?M=162070985&S=159215"
+MENU_PATH = ["Ödemeler", "MTV/Trafik Cezası", "MTV Ödeme"]
 PLATE = "16Y6042"
 PERIOD = "2026"
-ITERATIONS = 100                                      # kaç kez çalıştırılacak
+ITERATIONS = 100
 REPORT_FILE = Path("service_report.csv")
 
-# -------------------------------------------------
-# 2️⃣ Chrome (headless) driver başlatma
-# -------------------------------------------------
 options = webdriver.ChromeOptions()
-options.add_argument("--headless")               # headless mod
-options.add_argument("--no-sandbox")             # CI ortamı için zorunlu
-options.add_argument("--disable-dev-shm-usage")  # bellek sınırlaması
-driver = webdriver.Chrome(options=options)      # PATH’te chromedriver var
+options.add_argument("--headless")
+options.add_argument("--no-sandbox")
+options.add_argument("--disable-dev-shm-usage")
+options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
-# CDP ile network izleme (Chrome aynı API)
-driver.execute_cdp_cmd("Network.enable", {})
-
-network_events = []   # her iteration’da toplanacak
-current_iter = 0
-
-def _log_request(event):
-    network_events.append({
-        "iteration": current_iter,
-        "requestId": event["requestId"],
-        "url": event["request"]["url"],
-        "method": event["request"]["method"],
-        "startTime": event["timestamp"],
-        "status": None,
-        "endTime": None,
-        "durationMs": None
-    })
-
-def _log_response(event):
-    req_id = event["requestId"]
-    for rec in network_events:
-        if rec["requestId"] == req_id and rec["iteration"] == current_iter:
-            rec["status"] = event["response"]["status"]
-            rec["endTime"] = event["timestamp"]
-            rec["durationMs"] = round((rec["endTime"] - rec["startTime"]) * 1000, 2)
-            break
-
-driver.execute_cdp_cmd("Network.addRequestWillBeSentListener", {"listener": _log_request})
-driver.execute_cdp_cmd("Network.addResponseReceivedListener", {"listener": _log_response})
-
+driver = webdriver.Chrome(options=options)
 wait = WebDriverWait(driver, 20)
 
-# -------------------------------------------------
-# 3️⃣ 100 Tekrar Döngüsü
-# -------------------------------------------------
+network_events = []
+
 try:
-    for current_iter in range(1, ITERATIONS + 1):
+    for i in range(1, ITERATIONS + 1):
         driver.get(BASE_URL)
 
-        # Menü gezin
         for item in MENU_PATH:
-            elem = wait.until(
-                EC.element_to_be_clickable((By.XPATH, f"//a[normalize-space()='{item}']"))
-            )
+            elem = wait.until(EC.element_to_be_clickable((By.XPATH, f"//a[normalize-space()='{item}']")))
             elem.click()
             time.sleep(0.3)
 
-        # Form doldur
         plate_input = wait.until(EC.presence_of_element_located((By.ID, "plateInput")))
         period_input = driver.find_element(By.ID, "periodInput")
         plate_input.clear(); plate_input.send_keys(PLATE)
         period_input.clear(); period_input.send_keys(PERIOD)
 
-        # Sorgula
         driver.find_element(By.XPATH, "//button[normalize-space()='Sorgula']").click()
         wait.until(EC.visibility_of_element_located((By.ID, "resultTable")))
-        time.sleep(1)   # ağ trafiği tamamlanması için
+        time.sleep(1)
 
-        print(f"✅ Iteration {current_iter}/{ITERATIONS} tamamlandı.")
+        # Performans loglarını al ve timeout sürelerini hesapla
+        logs = driver.get_log("performance")
+        for entry in logs:
+            msg = json.loads(entry["message"])["message"]
+            if msg["method"] == "Network.responseReceived":
+                url = msg["params"]["response"]["url"]
+                status = msg["params"]["response"]["status"]
+                request_id = msg["params"]["requestId"]
+                start_time = msg["params"]["response"]["timing"]["requestTime"]
+
+                # loadingFinished event ile duration hesapla
+                duration = None
+                for e in logs:
+                    m = json.loads(e["message"])["message"]
+                    if m["method"] == "Network.loadingFinished" and m["params"]["requestId"] == request_id:
+                        end_time = m["params"]["timestamp"]
+                        duration = round((end_time - start_time) * 1000, 2)
+                        break
+
+                network_events.append({
+                    "iteration": i,
+                    "url": url,
+                    "status": status,
+                    "durationMs": duration
+                })
+
+        print(f"✅ Iteration {i}/{ITERATIONS} tamamlandı.")
+
 finally:
-    # -------------------------------------------------
-    # 4️⃣ CSV raporu oluştur
-    # -------------------------------------------------
     with REPORT_FILE.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f,
-                                fieldnames=["iteration", "url", "method", "status", "durationMs"])
+        writer = csv.DictWriter(f, fieldnames=["iteration", "url", "status", "durationMs"])
         writer.writeheader()
         for rec in network_events:
-            if rec["url"].startswith(BASE_URL):
-                writer.writerow({
-                    "iteration": rec["iteration"],
-                    "url": rec["url"],
-                    "method": rec["method"],
-                    "status": rec["status"],
-                    "durationMs": rec["durationMs"]
-                })
+            writer.writerow(rec)
 
     print(f"\n📊 Rapor oluşturuldu: {REPORT_FILE.resolve()}\n")
     driver.quit()
