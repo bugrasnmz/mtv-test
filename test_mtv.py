@@ -1,91 +1,153 @@
-import csv, time, json, statistics
+import csv
+import json
+import os
+import shlex
+import statistics
+import time
 from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-BASE_URL = "https://ekip.internetsube.intisbank/ekip_retailinternet/index.aspx?M=162070985&S=159215"
-MENU_PATH = ["Ödemeler", "MTV/Trafik Cezası", "MTV Ödeme"]
-PLATE = "16Y6042"
-PERIOD = "2026"
-ITERATIONS = 100
-REPORT_FILE = Path("service_report.csv")
+def getenv_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
-options = webdriver.ChromeOptions()
-options.add_argument("--headless")
-options.add_argument("--no-sandbox")
-options.add_argument("--disable-dev-shm-usage")
-options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
-driver = webdriver.Chrome(options=options)
-wait = WebDriverWait(driver, 20)
+def getenv_str(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    return value if value else default
 
-network_events = []
 
-try:
-    for i in range(1, ITERATIONS + 1):
-        driver.get(BASE_URL)
+BASE_URL = getenv_str(
+    "MTV_BASE_URL",
+    "https://ekip.internetsube.intisbank/ekip_retailinternet/index.aspx?M=162070985&S=159215",
+)
+MENU_PATH = [
+    item.strip()
+    for item in getenv_str("MTV_MENU_PATH", "Ödemeler|MTV/Trafik Cezası|MTV Ödeme").split("|")
+    if item.strip()
+]
+PLATE = getenv_str("MTV_PLATE", "16Y6042")
+PERIOD = getenv_str("MTV_PERIOD", "2026")
+ITERATIONS = max(getenv_int("MTV_ITERATIONS", 100), 1)
+WAIT_TIMEOUT = max(getenv_int("MTV_WAIT_TIMEOUT_SECONDS", 20), 1)
+REPORT_FILE = Path(getenv_str("MTV_REPORT_FILE", "service_report.csv"))
+CHROME_FLAGS = getenv_str("CHROME_FLAGS", "--headless=new --no-sandbox --disable-dev-shm-usage")
 
-        for item in MENU_PATH:
-            elem = wait.until(EC.element_to_be_clickable((By.XPATH, f"//a[normalize-space()='{item}']")))
-            elem.click()
-            time.sleep(0.3)
 
-        plate_input = wait.until(EC.presence_of_element_located((By.ID, "plateInput")))
-        period_input = driver.find_element(By.ID, "periodInput")
-        plate_input.clear(); plate_input.send_keys(PLATE)
-        period_input.clear(); period_input.send_keys(PERIOD)
+def build_driver() -> webdriver.Chrome:
+    options = webdriver.ChromeOptions()
+    for flag in shlex.split(CHROME_FLAGS):
+        options.add_argument(flag)
+    options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+    return webdriver.Chrome(options=options)
 
-        driver.find_element(By.XPATH, "//button[normalize-space()='Sorgula']").click()
-        wait.until(EC.visibility_of_element_located((By.ID, "resultTable")))
-        time.sleep(1)
 
-        # Performans loglarını al ve timeout sürelerini hesapla
-        logs = driver.get_log("performance")
-        for entry in logs:
+def extract_network_events(raw_logs: list[dict], iteration: int) -> list[dict]:
+    parsed_messages = []
+    finished_timestamps = {}
+    events = []
+
+    for entry in raw_logs:
+        try:
             msg = json.loads(entry["message"])["message"]
-            if msg["method"] == "Network.responseReceived":
-                url = msg["params"]["response"]["url"]
-                status = msg["params"]["response"]["status"]
-                request_id = msg["params"]["requestId"]
-                start_time = msg["params"]["response"]["timing"]["requestTime"]
+        except (KeyError, TypeError, json.JSONDecodeError):
+            continue
+        parsed_messages.append(msg)
+        if msg.get("method") == "Network.loadingFinished":
+            request_id = msg.get("params", {}).get("requestId")
+            timestamp = msg.get("params", {}).get("timestamp")
+            if request_id is not None and isinstance(timestamp, (int, float)):
+                finished_timestamps[request_id] = timestamp
 
-                duration = None
-                for e in logs:
-                    m = json.loads(e["message"])["message"]
-                    if m["method"] == "Network.loadingFinished" and m["params"]["requestId"] == request_id:
-                        end_time = m["params"]["timestamp"]
-                        duration = round((end_time - start_time) * 1000, 2)
-                        break
+    for msg in parsed_messages:
+        if msg.get("method") != "Network.responseReceived":
+            continue
 
-                network_events.append({
-                    "iteration": i,
-                    "url": url,
-                    "status": status,
-                    "durationMs": duration
-                })
+        params = msg.get("params", {})
+        response = params.get("response", {})
+        request_id = params.get("requestId")
+        start_time = (response.get("timing") or {}).get("requestTime")
+        end_time = finished_timestamps.get(request_id)
 
-        print(f"✅ Iteration {i}/{ITERATIONS} tamamlandı.")
+        duration = None
+        if isinstance(start_time, (int, float)) and isinstance(end_time, (int, float)):
+            duration = round((end_time - start_time) * 1000, 2)
 
-finally:
-    # CSV raporu yaz
-    with REPORT_FILE.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["iteration", "url", "status", "durationMs"])
+        events.append(
+            {
+                "iteration": iteration,
+                "url": response.get("url"),
+                "status": response.get("status"),
+                "durationMs": duration,
+            }
+        )
+
+    return events
+
+
+def write_report(records: list[dict]) -> None:
+    with REPORT_FILE.open("w", newline="", encoding="utf-8") as file_obj:
+        writer = csv.DictWriter(file_obj, fieldnames=["iteration", "url", "status", "durationMs"])
         writer.writeheader()
-        for rec in network_events:
-            writer.writerow(rec)
+        writer.writerows(records)
 
-    # Özet istatistikler
-    durations = [rec["durationMs"] for rec in network_events if rec["durationMs"] is not None]
+    durations = [rec["durationMs"] for rec in records if rec["durationMs"] is not None]
     if durations:
-        avg = round(statistics.mean(durations), 2)
-        min_dur = round(min(durations), 2)
-        max_dur = round(max(durations), 2)
-        print("\n📊 Özet İstatistikler:")
-        print(f"- Ortalama süre: {avg} ms")
-        print(f"- Minimum süre: {min_dur} ms")
-        print(f"- Maksimum süre: {max_dur} ms")
+        print("\nOzet Istatistikler:")
+        print(f"- Ortalama sure: {round(statistics.mean(durations), 2)} ms")
+        print(f"- Minimum sure: {round(min(durations), 2)} ms")
+        print(f"- Maksimum sure: {round(max(durations), 2)} ms")
 
-    print(f"\n📂 Rapor oluşturuldu: {REPORT_FILE.resolve()}\n")
-    driver.quit()
+    print(f"\nRapor olusturuldu: {REPORT_FILE.resolve()}\n")
+
+
+def main() -> None:
+    network_events = []
+    driver = None
+
+    try:
+        driver = build_driver()
+        wait = WebDriverWait(driver, WAIT_TIMEOUT)
+
+        for i in range(1, ITERATIONS + 1):
+            driver.get(BASE_URL)
+
+            for item in MENU_PATH:
+                elem = wait.until(EC.element_to_be_clickable((By.XPATH, f"//a[normalize-space()='{item}']")))
+                elem.click()
+                time.sleep(0.3)
+
+            plate_input = wait.until(EC.presence_of_element_located((By.ID, "plateInput")))
+            period_input = driver.find_element(By.ID, "periodInput")
+            plate_input.clear()
+            plate_input.send_keys(PLATE)
+            period_input.clear()
+            period_input.send_keys(PERIOD)
+
+            driver.find_element(By.XPATH, "//button[normalize-space()='Sorgula']").click()
+            wait.until(EC.visibility_of_element_located((By.ID, "resultTable")))
+            time.sleep(1)
+
+            logs = driver.get_log("performance")
+            network_events.extend(extract_network_events(logs, i))
+            print(f"Iteration {i}/{ITERATIONS} tamamlandi.")
+
+    finally:
+        write_report(network_events)
+        if driver is not None:
+            driver.quit()
+
+
+if __name__ == "__main__":
+    main()

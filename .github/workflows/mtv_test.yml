@@ -1,11 +1,40 @@
-name: MTV Sorgu Testi (100 Tekrar)
+name: MTV Sorgu Testi
 
 on:
   workflow_dispatch:
+    inputs:
+      iterations:
+        description: "Test tekrar sayisi"
+        required: false
+        default: "100"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/mtv_test.yml"
+      - "test_mtv.py"
+      - "requirements.txt"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/mtv_test.yml"
+      - "test_mtv.py"
+      - "requirements.txt"
+
+permissions:
+  contents: read
 
 jobs:
   run-test:
-    runs-on: ubuntu-latest
+    name: Run MTV Selenium test
+    # Internal URL targeti nedeniyle bu job self-hosted runner'da calismalidir.
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 60
+    env:
+      MTV_BASE_URL: ${{ vars.MTV_BASE_URL }}
+      MTV_PLATE: ${{ vars.MTV_PLATE }}
+      MTV_PERIOD: ${{ vars.MTV_PERIOD }}
+      MTV_ITERATIONS: ${{ github.event.inputs.iterations || vars.MTV_ITERATIONS || '100' }}
+      CHROME_FLAGS: "--headless=new --no-sandbox --disable-dev-shm-usage"
 
     steps:
       - name: Checkout repository
@@ -15,35 +44,32 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      # -------------------------------------------------
-      # ChromeDriver kurulumu (Chrome zaten runner’da mevcut)
-      # -------------------------------------------------
-      - name: Install matching ChromeDriver
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget unzip curl || true
-
-          CHROME_VER=$(google-chrome --version | awk '{print $3}')
-          CHROME_MAJOR=$(echo $CHROME_VER | cut -d. -f1)
-
-          DRIVER_VER=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR}")
-          curl -s -o chromedriver_linux64.zip "https://chromedriver.storage.googleapis.com/${DRIVER_VER}/chromedriver_linux64.zip"
-          unzip -o chromedriver_linux64.zip -d /usr/local/bin
-          chmod +x /usr/local/bin/chromedriver
+          cache: "pip"
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Selenium test (Chrome headless)
-        env:
-          CHROME_FLAGS: "--headless --no-sandbox --disable-dev-shm-usage"
+      - name: Verify Chrome is available
+        run: |
+          if command -v google-chrome >/dev/null 2>&1; then
+            google-chrome --version
+          elif command -v google-chrome-stable >/dev/null 2>&1; then
+            google-chrome-stable --version
+          else
+            echo "google-chrome bulunamadi."
+            echo "Self-hosted runner uzerinde Chrome kurulumu yapin."
+            exit 1
+          fi
+
+      - name: Run Selenium test
         run: python test_mtv.py
 
       - name: Upload service report
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: mtv-service-report
           path: service_report.csv
+          if-no-files-found: warn
